@@ -21,10 +21,10 @@ trait Stream[+A] {
   }
 
   def take(n: Int): Stream[A] = {
-    if (n <= 0) Empty
-    else this match {
-      case Empty => Empty
-      case Cons(h, t) => Cons(h, () => t().take(n-1))
+    unfold((this, n)) {
+      case (Cons(h, _), 1) => Some(( h(), (empty, 0) ))
+      case (Cons(h, t), i) if i > 1 => Some(( h(), (t(), i - 1) ))
+      case _ => None
     }
   }
 
@@ -38,9 +38,9 @@ trait Stream[+A] {
   }
 
   def takeWhile(p: A => Boolean): Stream[A] =
-    foldRight(Empty: Stream[A]) { (a, b) =>
-      if (p(a)) Stream.cons(a, b)
-      else Empty
+    unfold(this) {
+      case Cons(h, t) if p(h()) => Some(h(), t())
+      case _ => None
     }
 
   def forAll(p: A => Boolean): Boolean =
@@ -53,12 +53,10 @@ trait Stream[+A] {
       (a, _) => Some(a)
     }
 
-  // 5.7 map, filter, append, flatmap using foldRight. Part of the exercise is
-  // writing your own function signatures.
-
   def map[B](f: A => B): Stream[B] =
-    foldRight(Empty: Stream[B]) { (a, b) =>
-      Stream.cons(f(a), b)
+    unfold(this) {
+      case Cons(h, t) => Some( (f(h()), t()) )
+      case _ => None
     }
 
   def filter(p: A => Boolean): Stream[A] =
@@ -78,11 +76,35 @@ trait Stream[+A] {
       f(a) append b
     }
 
-  def startsWith[B](s: Stream[B]): Boolean = ???
+  def zipWith[B](bs: Stream[B])(f: (A, B) => B): Stream[B] =
+    unfold((this, bs)) {
+      case (Cons(h1, t1), Cons(h2, t2)) => Some(( f(h1(), h2()), (t1(), t2()) ))
+      case _ => None
+    }
+
+  def zipAll[B](bs: Stream[B]): Stream[(Option[A], Option[B])] =
+    unfold((this, bs)) {
+      case (Cons(h1, t1), Cons(h2, t2)) => Some(((Some(h1()), Some(h2())), (t1(), t2())))
+      case (Cons(h1, t1), Empty) => Some(((Some(h1()), None), (t1(), empty)))
+      case (Empty, Cons(h2, t2)) => Some(((None, Some(h2())), (empty, t2())))
+      case _ => None
+    }
+
+  def startsWith[B](s: Stream[B]): Boolean =
+    this.zipAll(s).takeWhile(_._2.isDefined).forAll {
+      case (h1, h2) => h1 == h2
+    }
 
   def toList: List[A] = this match {
     case Cons(h, t) => h() :: t().toList
     case _ => List()
+  }
+
+  def tails: Stream[Stream[A]] = {
+    unfold(this) {
+      case Empty => None
+      case s => Some((s, s.drop(1)))
+    }.append(Stream(Empty))
   }
 
   override def toString: String = toList.toString.replace("List", "Stream")
